@@ -18,7 +18,7 @@
 #define DEFAULTTIME     10
 #define DEFAULTKOMI      7
 
-#define SAMPLES          2
+#define SAMPLES        100
 
 #define MAXGAMELENGTH 1000
 #define MAXSTRING       50
@@ -84,10 +84,15 @@ int find_liberty(int X, int Y, int label, int Board[BOUNDARYSIZE][BOUNDARYSIZE],
 	if (Board[X+DirectionX[d]][Y+DirectionY[d]] == EMPTY){
 	    total_liberty++;
 	}
+	if(total_liberty >= 2)
+        break;
 	// This neighboorhood is self stone
 	else if (Board[X+DirectionX[d]][Y+DirectionY[d]] == Board[X][Y]) {
 	    total_liberty += find_liberty(X+DirectionX[d], Y+DirectionY[d], label, Board, ConnectBoard);
 	}
+	// We only consider the case that liberty is 1 or 0.
+	if(total_liberty >= 2)
+        break;
     }
     return total_liberty;
 }
@@ -99,17 +104,17 @@ void count_liberty(int X, int Y, int Board[BOUNDARYSIZE][BOUNDARYSIZE], int Libe
     int ConnectBoard[BOUNDARYSIZE][BOUNDARYSIZE];
     // Initial the ConnectBoard
     for (int i = 0 ; i < BOUNDARYSIZE; ++i) {
-	for (int j = 0 ; j < BOUNDARYSIZE; ++j) {
-	    ConnectBoard[i][j] = 0;
-	}
+        for (int j = 0 ; j < BOUNDARYSIZE; ++j) {
+            ConnectBoard[i][j] = 0;
+        }
     }
     // Find the same connect component and its liberity
     for (int d = 0 ; d < MAXDIRECTION; ++d) {
-	Liberties[d] = 0;
-	if (Board[X+DirectionX[d]][Y+DirectionY[d]] == BLACK ||
-	    Board[X+DirectionX[d]][Y+DirectionY[d]] == WHITE    ) {
-	    Liberties[d] = find_liberty(X+DirectionX[d], Y+DirectionY[d], d, Board, ConnectBoard);
-	}
+        Liberties[d] = 0;
+        if (Board[X+DirectionX[d]][Y+DirectionY[d]] == BLACK ||
+            Board[X+DirectionX[d]][Y+DirectionY[d]] == WHITE    ) {
+            Liberties[d] = find_liberty(X+DirectionX[d], Y+DirectionY[d], d, Board, ConnectBoard);
+        }
     }
 }
 
@@ -268,7 +273,7 @@ int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_len
     for (int x = 1 ; x <= BOARDSIZE; ++x) {
 	for (int y = 1 ; y <= BOARDSIZE; ++y) {
 	    // check if current
-	    if (Board[x][y] == 0) {
+	    if (Board[x][y] == EMPTY) {
 		// check the liberty of the neighborhood intersections
 		num_neighborhood_self = 0;
 		num_neighborhood_oppo = 0;
@@ -281,105 +286,114 @@ int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_len
 			&num_neighborhood_oppo,
 			&num_neighborhood_boun, NeighboorhoodState);
 		// check if the empty intersection is a legal move
-		next_x = next_y = 0;
-		eat_move = 0;
-		count_liberty(x, y, Board, Liberties);
-		// Case 1: exist empty intersection in the neighborhood
-		 if (num_neighborhood_empt > 0) {
-		     next_x = x;
-		     next_y = y;
-		     // check if it is a capture move
-		     for (int d = 0 ; d < MAXDIRECTION; ++d) {
-			 if (NeighboorhoodState[d] == OPPONENT && Liberties[d] == 1) {
-			     eat_move = 1;
-			 }
-		     }
-		 }
-		 // Case 2: no empty intersection in the neighborhood
-		 else {
-		    // Case 2.1: Surround by the self piece
-		    if (num_neighborhood_self + num_neighborhood_boun == MAXDIRECTION) {
-			int check_flag = 0, check_eye_flag = num_neighborhood_boun;
-			for (int d = 0 ; d < MAXDIRECTION; ++d) {
-			    // Avoid fill self eye
-			    if (NeighboorhoodState[d]==SELF && Liberties[d] > 1) {
-				check_eye_flag++;
-			    }
-			    // Check if there is one self component which has more than one liberty
-			    if (NeighboorhoodState[d]==SELF && Liberties[d] > 1) {
-				check_flag = 1;
-			    }
-			}
-			if (check_flag == 1 && check_eye_flag!=4) {
-			    next_x = x;
-			    next_y = y;
-			}
-		    }
-		    // Case 2.2: Surround by opponent or both side's pieces.
-		    else if (num_neighborhood_oppo > 0) {
-			int check_flag = 0;
-			int eat_flag = 0;
-			for (int d = 0 ; d < MAXDIRECTION; ++d) {
-			    // Check if there is one self component which has more than one liberty
-			    if (NeighboorhoodState[d]==SELF && Liberties[d] > 1) {
-				check_flag = 1;
-			    }
-			    // Check if there is one opponent's component which has exact one liberty
-			    if (NeighboorhoodState[d]==OPPONENT && Liberties[d] == 1) {
-				eat_flag = 1;
-			    }
-			}
-			if (check_flag == 1) {
-			    next_x = x;
-			    next_y = y;
-			    if (eat_flag == 1) {
-				eat_move = 1;
-			    }
-			}
-			else { // check_flag == 0
-			    if (eat_flag == 1) {
-				next_x = x;
-				next_y = y;
-				eat_move = 1;
-			    }
-			}
-		    }
-		 }
+		if(num_neighborhood_empt == 4){
+            next_x = x;
+            next_y = y;
+            eat_move = 0;
+		}
+		else {
+            next_x = next_y = 0;
+            eat_move = 0;
+            count_liberty(x, y, Board, Liberties);
+            // Case 1: exist empty intersection in the neighborhood
+             if (num_neighborhood_empt > 0) {
+                 next_x = x;
+                 next_y = y;
+                 // check if it is a capture move
+                 for (int d = 0 ; d < MAXDIRECTION; ++d) {
+                     if (NeighboorhoodState[d] == OPPONENT && Liberties[d] == 1) {
+                         eat_move = 1;
+                     }
+                 }
+             }
+             // Case 2: no empty intersection in the neighborhood
+             else {
+                // Case 2.1: Surround by the self piece
+                if (num_neighborhood_self + num_neighborhood_boun == MAXDIRECTION) {
+                int check_flag = 0, check_eye_flag = num_neighborhood_boun;
+                for (int d = 0 ; d < MAXDIRECTION; ++d) {
+                    // Avoid fill self eye
+                    if (NeighboorhoodState[d]==SELF && Liberties[d] > 1) {
+                    check_eye_flag++;
+                    }
+                    // Check if there is one self component which has more than one liberty
+                    if (NeighboorhoodState[d]==SELF && Liberties[d] > 1) {
+                    check_flag = 1;
+                    }
+                }
+                if (check_flag == 1 && check_eye_flag!=4) {
+                    next_x = x;
+                    next_y = y;
+                }
+                }
+                // Case 2.2: Surround by opponent or both side's pieces.
+                else if (num_neighborhood_oppo > 0) {
+                int check_flag = 0;
+                int eat_flag = 0;
+                for (int d = 0 ; d < MAXDIRECTION; ++d) {
+                    // Check if there is one self component which has more than one liberty
+                    if (NeighboorhoodState[d]==SELF && Liberties[d] > 1) {
+                    check_flag = 1;
+                    }
+                    // Check if there is one opponent's component which has exact one liberty
+                    if (NeighboorhoodState[d]==OPPONENT && Liberties[d] == 1) {
+                    eat_flag = 1;
+                    }
+                }
+                if (check_flag == 1) {
+                    next_x = x;
+                    next_y = y;
+                    if (eat_flag == 1) {
+                    eat_move = 1;
+                    }
+                }
+                else { // check_flag == 0
+                    if (eat_flag == 1) {
+                    next_x = x;
+                    next_y = y;
+                    eat_move = 1;
+                    }
+                }
+                }
+             }
+         }
 		 if (next_x !=0 && next_y !=0) {
-		 // copy the current board to next board
-		    for (int i = 0 ; i < BOUNDARYSIZE; ++i) {
-			for (int j = 0 ; j < BOUNDARYSIZE; ++j) {
-			    NextBoard[i][j] = Board[i][j];
-			}
-		    }
-		    // do the move
-		    // The move is a capture move and the board needs to be updated.
-		    if (eat_move == 1) {
-			update_board(NextBoard, next_x, next_y, turn);
-		    }
-		    else {
-			NextBoard[x][y] = turn;
-		    }
-		    // Check the history to avoid the repeat board (what the fuck?)
-		    bool repeat_move = 0;
-		    for (int t = 0 ; t < game_length; ++t) {
-			bool repeat_flag = 1;
-			for (int i = 1; i <=BOARDSIZE; ++i) {
-			    for (int j = 1; j <=BOARDSIZE; ++j) {
-				if (NextBoard[i][j] != GameRecord[t][i][j]) {
-				    repeat_flag = 0;
-				}
-			    }
-			}
-			if (repeat_flag == 1) {
-			    repeat_move = 1;
-			    break;
-			}
-		    }
+            bool repeat_move = 0;
+            if(game_length >= 60){
+                // copy the current board to next board
+                copy(&Board[0][0], &Board[0][0] + 11*11, &NextBoard[0][0]);
+                // do the move
+                // The move is a capture move and the board needs to be updated.
+                if (eat_move == 1) {
+                    update_board(NextBoard, next_x, next_y, turn);
+                }
+                else {
+                    NextBoard[x][y] = turn;
+                }
+                // Check the history to avoid the repeat board (what the fuck?)
+                for (int t = 0 ; t < game_length; ++t) {
+                bool repeat_flag = 1;
+                for (int i = 1; i <=BOARDSIZE; ++i) {
+                    for (int j = 1; j <=BOARDSIZE; ++j) {
+                    if (NextBoard[i][j] != GameRecord[t][i][j]) {
+                        repeat_flag = 0;
+                        break;
+                    }
+                    }
+                    if(repeat_flag == 0){
+                        break;
+                    }
+                }
+                if (repeat_flag == 1) {
+                    repeat_move = 1;
+                    break;
+                }
+                }
+            }
 		    if (repeat_move == 0) {
-			// 3 digit zxy, z means eat or not, and put at (x, y)
-			MoveList[legal_moves] = eat_move * 100 + next_x * 10 + y ;
-			legal_moves++;
+                // 3 digit zxy, z means eat or not, and put at (x, y)
+                MoveList[legal_moves] = eat_move * 100 + next_x * 10 + y ;
+                legal_moves++;
 		    }
 		 }
 	    }
@@ -395,9 +409,10 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
     double time_taken;
     int i,j;
     int sample;
+    int Num_samples = 0;
     int score;
     float mean_score;
-    int max_score = -100;
+    int max_score = -10000*SAMPLES;
     int max_move_id = 0;
     int NewMoveList[HISTORYLENGTH];
     int NextBoard[BOUNDARYSIZE][BOUNDARYSIZE];
@@ -406,12 +421,21 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
     // write something to file
     FILE *fp;
     fp = fopen("stdout.txt","a");
+    setbuf(fp, NULL);
     srand(time(NULL));
 
     if (num_legal_moves == 0)
-	return 0;
+        return 0;
     else {
-
+    // sample more times if less steps.
+    if(num_legal_moves<=81 && num_legal_moves>40)
+        Num_samples = SAMPLES;
+    else if(num_legal_moves<=40 && num_legal_moves>20)
+        Num_samples = SAMPLES*2;
+    else if(num_legal_moves<=20 && num_legal_moves>10)
+        Num_samples = SAMPLES*4;
+    else
+        Num_samples = SAMPLES*10;
     // simulate
 	int move_id;
 	for(i=1 ; i<=num_legal_moves ; i++){
@@ -419,9 +443,10 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
         fprintf(fp,"Game_length: %d\n",game_length);
         // mean
         mean_score = 0;
+
         // sample 10 times for each branch
         start_t = clock();
-        for(sample=1 ; sample<=SAMPLES ; sample++){
+        for(sample=1 ; sample<=Num_samples ; sample++){
             // copy board
             copy(&Board[0][0], &Board[0][0] + 11*11, &NextBoard[0][0]);
             for(j=1 ; j<150 ; j++){
@@ -443,15 +468,20 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
                 next_legal_moves = gen_legal_move(NextBoard, turn, game_length, GameRecord, NewMoveList);
                 if(next_legal_moves == 0){
                     score = final_score(NextBoard);
-                    //fprintf(fp,"Score: %d Steps:%d Move_id:%d\n",score,j,move_id);
-                    mean_score = (float) mean_score + score;
+                    // penalize lose points
+                    if(score < DEFAULTKOMI){
+                        mean_score = (float) mean_score + 50*(score-DEFAULTKOMI);
+                    }
+                    else {
+                        mean_score = (float) mean_score + (score-DEFAULTKOMI);
+                    }
                     break;
                 }
                 else if(next_legal_moves != 0)
                     continue;
             }
         }
-        mean_score = (float) mean_score/SAMPLES;
+        mean_score = (float) mean_score/Num_samples;
         fprintf(fp,"Mean score: %.2f Move_id:%d\n",mean_score,move_id);
         if(mean_score>max_score){
             max_score = mean_score;
