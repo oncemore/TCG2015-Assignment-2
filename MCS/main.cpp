@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <ctime>
+#include <cmath>
 
 #define BOARDSIZE        9
 #define BOUNDARYSIZE    11
@@ -18,7 +19,7 @@
 #define DEFAULTTIME     10
 #define DEFAULTKOMI      7
 
-#define SAMPLES          5
+#define SAMPLES         50
 
 #define MAXGAMELENGTH 1000
 #define MAXSTRING       50
@@ -408,18 +409,30 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
     clock_t start_t, end_t;
     double time_taken;
     int i,j;
-    int sample; // do samples
-    int Num_samples = 0; // samples for each branch
-
+    int sample = 0; // do samples
+     // samples for each parent
+    int first_N_round = 15; // UCB first n round
+    int Num_max_samples = num_legal_moves*first_N_round;
+    if(num_legal_moves>60)
+        Num_max_samples += 300;
+    if(num_legal_moves<=60 && num_legal_moves>50)
+        Num_max_samples += 600;
+    if(num_legal_moves<=50 && num_legal_moves>40)
+        Num_max_samples += 1200;
+    if(num_legal_moves<=40 && num_legal_moves>20)
+        Num_max_samples += 1500;
+    if(num_legal_moves<=20)
+        Num_max_samples += 1000;
     // variables for statistic use
     int score;
-    float mean_score;
     float max_score;
-    int max_score_in_samples;
-    int wins_in_samples;
-    int loses_in_samples;
+    double UCB[NUMINTERSECTION];
+    int scores_in_branch[NUMINTERSECTION];
+    int games_in_branch[NUMINTERSECTION];
     int max_move_id = 0;
-
+    int max_UCB_id = 0;
+    double max_UCB = 0;
+    // NUMINTERSECTION
     int NewMoveList[HISTORYLENGTH]; // avoid to modify MoveList
     int NextBoard[BOUNDARYSIZE][BOUNDARYSIZE]; // avoid to modify Board
     int turn_reset; // avoid to modify turn
@@ -433,88 +446,88 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
     if (num_legal_moves == 0)
         return 0;
     else {
-    // sample more times if less steps.
-    if(num_legal_moves<=81 && num_legal_moves>40)
-        Num_samples = SAMPLES;
-    else if(num_legal_moves<=40 && num_legal_moves>20)
-        Num_samples = SAMPLES*2;
-    else if(num_legal_moves<=20 && num_legal_moves>10)
-        Num_samples = SAMPLES*4;
-    else
-        Num_samples = SAMPLES*10;
     // simulate
 	int move_id;
-	for(i=1 ; i<=num_legal_moves ; i++){
-        move_id = i%num_legal_moves;
-        fprintf(fp,"Game_length: %d\n",game_length);
-        // mean
-        mean_score = 0;
-
-        wins_in_samples = 0;
-        loses_in_samples = 0;
-        max_score_in_samples = -100;
-
-        // sample 10 times for each branch
-        start_t = clock();
-        for(sample=1 ; sample<=Num_samples ; sample++){
-            // copy board
-            copy(&Board[0][0], &Board[0][0] + 11*11, &NextBoard[0][0]);
-            turn_reset = turn;
-            for(j=1 ; j<150 ; j++){
-                // update
-                if(j==1){
-                    do_move(NextBoard, turn_reset, MoveList[move_id]);
-                    //fprintf(fp,"%d %d %d\n",(MoveList[move_id] % 100) / 10,MoveList[move_id] % 10, turn);
+	for(i=0 ; i<NUMINTERSECTION ; i++){
+        scores_in_branch[i] = 0;
+        games_in_branch[i] = 0;
+        UCB[i] = 0;
+	}
+	start_t = clock();
+	for(sample=1 ; sample<=Num_max_samples+1 ; sample++){
+        if(sample <= num_legal_moves*first_N_round)
+            move_id = sample%num_legal_moves;
+        // calculate max UCB
+        if(sample > num_legal_moves*first_N_round){
+            for(i=0 ; i<num_legal_moves ; i++){
+                UCB[i] = (double) scores_in_branch[i]/games_in_branch[i] + 1.414*sqrt(log(sample-1)/games_in_branch[i]);
+                if(i==0){
+                    max_UCB_id = 0;
+                    max_UCB = UCB[0];
                 }
-                else{
-                    do_move(NextBoard, turn_reset, NewMoveList[rand()%next_legal_moves]);
-                }
-                // change turn
-                if(turn_reset == BLACK){
-                    turn_reset = WHITE;
-                }
-                else{
-                    turn_reset = BLACK;
+                else if(UCB[i]>max_UCB){
+                    max_UCB_id = i;
+                    max_UCB = UCB[i];
                 }
 
-                next_legal_moves = gen_legal_move(NextBoard, turn_reset, game_length, GameRecord, NewMoveList);
-
-                if(next_legal_moves == 0){
-                    score = final_score(NextBoard);
-                    if((score-DEFAULTKOMI)>max_score_in_samples){
-                        max_score_in_samples = (score-DEFAULTKOMI);
-                    }
-                    // penalize lose points
-                    if(score < DEFAULTKOMI){
-                        mean_score = (float) mean_score - 50*(score-DEFAULTKOMI)*(score-DEFAULTKOMI);
-                        loses_in_samples++;
-                    }
-                    else {
-                        mean_score = (float) mean_score + (score-DEFAULTKOMI);
-                        wins_in_samples++;
-                    }
-                    break;
-                }
-                else if(next_legal_moves != 0)
-                    continue;
             }
+            move_id = max_UCB_id;
+            //fprintf(fp,"Best UCB Move id %d with UCB %.3f at length %d sample %d\n",move_id,UCB[move_id],game_length,sample);
         }
-        // statistics
-        mean_score = (float) mean_score/Num_samples;
-        fprintf(fp,"Mean score: %.2f Max score:%d Wins:%d Loses:%d Move_x:%d Move_y:%d\n",mean_score,max_score_in_samples,
-                wins_in_samples, loses_in_samples,
-                (MoveList[move_id] % 100) / 10,MoveList[move_id] % 10);
-        if(move_id == 1){
-            max_score = mean_score;
-            max_move_id = move_id;
+        if(sample == Num_max_samples+1)
+            break;
+        // copy board
+        copy(&Board[0][0], &Board[0][0] + 11*11, &NextBoard[0][0]);
+        turn_reset = turn;
+        for(j=1 ; j<150 ; j++){
+            // update
+            if(j==1){
+                do_move(NextBoard, turn_reset, MoveList[move_id]);
+                //fprintf(fp,"%d %d %d\n",(MoveList[move_id] % 100) / 10,MoveList[move_id] % 10, turn);
+            }
+            else{
+                do_move(NextBoard, turn_reset, NewMoveList[rand()%next_legal_moves]);
+            }
+            // change turn
+            if(turn_reset == BLACK){
+                turn_reset = WHITE;
+            }
+            else{
+                turn_reset = BLACK;
+            }
+
+            next_legal_moves = gen_legal_move(NextBoard, turn_reset, game_length, GameRecord, NewMoveList);
+
+            if(next_legal_moves == 0){
+                score = final_score(NextBoard);
+                // penalize lose points
+                if(score <= DEFAULTKOMI){
+                    scores_in_branch[move_id] = (float) scores_in_branch[move_id] - 50*(score-DEFAULTKOMI)*(score-DEFAULTKOMI);
+                    games_in_branch[move_id]++;
+                }
+                else {
+                    scores_in_branch[move_id] = (float) scores_in_branch[move_id] + (score-DEFAULTKOMI);
+                    games_in_branch[move_id]++;
+                }
+                break;
+            }
+            else if(next_legal_moves != 0)
+                continue;
         }
-        else if(mean_score>max_score){
-            max_score = mean_score;
-            max_move_id = move_id;
+	}
+	end_t = clock();
+    time_taken = ((double)(end_t-start_t))/CLOCKS_PER_SEC;
+    fprintf(fp,"Time: %f seconds at length %d, with legal moves: %d\n", time_taken, game_length, num_legal_moves);
+	// statistics
+	for(i=0 ; i<num_legal_moves ; i++){
+        if(i == 0){
+            max_score = UCB[i];
+            max_move_id = i;
         }
-        end_t = clock();
-        time_taken = ((double)(end_t-start_t))/CLOCKS_PER_SEC;
-        fprintf(fp,"Time: %f seconds\n", time_taken);
+        else if(UCB[i]>max_score){
+            max_score = UCB[i];
+            max_move_id = i;
+        }
 	}
 	return MoveList[max_move_id];
     }
