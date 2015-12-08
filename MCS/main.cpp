@@ -18,7 +18,7 @@
 #define DEFAULTTIME     10
 #define DEFAULTKOMI      7
 
-#define SAMPLES        100
+#define SAMPLES          5
 
 #define MAXGAMELENGTH 1000
 #define MAXSTRING       50
@@ -372,7 +372,7 @@ int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_len
                 }
                 // Check the history to avoid the repeat board (what the fuck?)
                 for (int t = 0 ; t < game_length; ++t) {
-                bool repeat_flag = 1;
+                    bool repeat_flag = 1;
                 for (int i = 1; i <=BOARDSIZE; ++i) {
                     for (int j = 1; j <=BOARDSIZE; ++j) {
                     if (NextBoard[i][j] != GameRecord[t][i][j]) {
@@ -408,16 +408,22 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
     clock_t start_t, end_t;
     double time_taken;
     int i,j;
-    int sample;
-    int Num_samples = 0;
+    int sample; // do samples
+    int Num_samples = 0; // samples for each branch
+
+    // variables for statistic use
     int score;
     float mean_score;
-    int max_score = -10000*SAMPLES;
+    float max_score;
+    int max_score_in_samples;
+    int wins_in_samples;
+    int loses_in_samples;
     int max_move_id = 0;
-    int NewMoveList[HISTORYLENGTH];
-    int NextBoard[BOUNDARYSIZE][BOUNDARYSIZE];
-    int next_legal_moves = 0;
-    int return_move = 0;
+
+    int NewMoveList[HISTORYLENGTH]; // avoid to modify MoveList
+    int NextBoard[BOUNDARYSIZE][BOUNDARYSIZE]; // avoid to modify Board
+    int turn_reset; // avoid to modify turn
+    int next_legal_moves = 0; // avoid to modify num_legal_moves
     // write something to file
     FILE *fp;
     fp = fopen("stdout.txt","a");
@@ -444,6 +450,10 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
         // mean
         mean_score = 0;
 
+        wins_in_samples = 0;
+        loses_in_samples = 0;
+        max_score_in_samples = -100;
+
         // sample 10 times for each branch
         start_t = clock();
         for(sample=1 ; sample<=Num_samples ; sample++){
@@ -452,28 +462,35 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
             for(j=1 ; j<150 ; j++){
                 // update
                 if(j==1){
-                    do_move(NextBoard, turn, MoveList[move_id]);
+                    do_move(NextBoard, turn_reset, MoveList[move_id]);
                     //fprintf(fp,"%d %d %d\n",(MoveList[move_id] % 100) / 10,MoveList[move_id] % 10, turn);
                 }
-                if(j!=1){
-                    do_move(NextBoard, turn, NewMoveList[rand()%next_legal_moves]);
-                    //fprintf(fp,"%d %d %d\n",(NewMoveList[move_id] % 100) / 10,NewMoveList[move_id] % 10, turn);
+                else{
+                    do_move(NextBoard, turn_reset, NewMoveList[rand()%next_legal_moves]);
                 }
                 // change turn
-                if(turn == BLACK)
-                    turn = WHITE;
-                else if(turn == WHITE)
-                    turn = BLACK;
-                // check stop (not finished, need to consider both pass)
-                next_legal_moves = gen_legal_move(NextBoard, turn, game_length, GameRecord, NewMoveList);
+                if(turn_reset == BLACK){
+                    turn_reset = WHITE;
+                }
+                else{
+                    turn_reset = BLACK;
+                }
+
+                next_legal_moves = gen_legal_move(NextBoard, turn_reset, game_length, GameRecord, NewMoveList);
+
                 if(next_legal_moves == 0){
                     score = final_score(NextBoard);
+                    if((score-DEFAULTKOMI)>max_score_in_samples){
+                        max_score_in_samples = (score-DEFAULTKOMI);
+                    }
                     // penalize lose points
                     if(score < DEFAULTKOMI){
-                        mean_score = (float) mean_score + 50*(score-DEFAULTKOMI);
+                        mean_score = (float) mean_score - 50*(score-DEFAULTKOMI)*(score-DEFAULTKOMI);
+                        loses_in_samples++;
                     }
                     else {
                         mean_score = (float) mean_score + (score-DEFAULTKOMI);
+                        wins_in_samples++;
                     }
                     break;
                 }
@@ -481,9 +498,16 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
                     continue;
             }
         }
+        // statistics
         mean_score = (float) mean_score/Num_samples;
-        fprintf(fp,"Mean score: %.2f Move_id:%d\n",mean_score,move_id);
-        if(mean_score>max_score){
+        fprintf(fp,"Mean score: %.2f Max score:%d Wins:%d Loses:%d Move_x:%d Move_y:%d\n",mean_score,max_score_in_samples,
+                wins_in_samples, loses_in_samples,
+                (MoveList[move_id] % 100) / 10,MoveList[move_id] % 10);
+        if(move_id == 1){
+            max_score = mean_score;
+            max_move_id = move_id;
+        }
+        else if(mean_score>max_score){
             max_score = mean_score;
             max_move_id = move_id;
         }
