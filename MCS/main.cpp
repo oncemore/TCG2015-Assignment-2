@@ -459,6 +459,7 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
         for(sample=1 ; sample<=Num_samples ; sample++){
             // copy board
             copy(&Board[0][0], &Board[0][0] + 11*11, &NextBoard[0][0]);
+            turn_reset = turn;
             for(j=1 ; j<150 ; j++){
                 // update
                 if(j==1){
