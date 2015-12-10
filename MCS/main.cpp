@@ -7,6 +7,8 @@
  * */
 #include <iostream>
 #include <fstream>
+#include <algorithm>
+#include <vector>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -40,6 +42,9 @@
 
 #define LOCALVERSION      1
 #define GTPVERSION        2
+
+#define RANDOM           1
+#define NONRANDOM        0
 
 using namespace std;
 int _board_size = BOARDSIZE;
@@ -260,19 +265,35 @@ int update_board_check(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int X, int Y, int 
  * This function return the number of legal moves with clor "turn" and
  * saves all legal moves in MoveList
  * */
-int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_length, int GameRecord[MAXGAMELENGTH][BOUNDARYSIZE][BOUNDARYSIZE], int MoveList[HISTORYLENGTH]) {
+int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_length
+                   , int GameRecord[MAXGAMELENGTH][BOUNDARYSIZE][BOUNDARYSIZE], int MoveList[HISTORYLENGTH], int random_bit) {
     int NextBoard[BOUNDARYSIZE][BOUNDARYSIZE];
     int num_neighborhood_self = 0;
     int num_neighborhood_oppo = 0;
     int num_neighborhood_empt = 0;
     int num_neighborhood_boun = 0;
     int legal_moves = 0;
+    int x,y;
     int next_x, next_y;
+    int random_index;
     int Liberties[4];
     int NeighboorhoodState[4];
     bool eat_move = 0;
-    for (int x = 1 ; x <= BOARDSIZE; ++x) {
-	for (int y = 1 ; y <= BOARDSIZE; ++y) {
+
+    int intersection_checked = 0;
+
+    random_index = rand()%81;
+
+    while(intersection_checked<81){
+        if(random_bit == 1){
+            x = random_index / 9 + 1;
+            y = random_index % 9 + 1;
+            random_index = (random_index + 67) % 81;
+        }
+        else{
+            x = (intersection_checked / 9) + 1;
+            y = (intersection_checked % 9) + 1;
+        }
 	    // check if current
 	    if (Board[x][y] == EMPTY) {
 		// check the liberty of the neighborhood intersections
@@ -311,7 +332,8 @@ int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_len
              else {
                 // Case 2.1: Surround by the self piece
                 if (num_neighborhood_self + num_neighborhood_boun == MAXDIRECTION) {
-                int check_flag = 0, check_eye_flag = num_neighborhood_boun;
+                int check_flag = 0,
+                check_eye_flag = num_neighborhood_boun;
                 for (int d = 0 ; d < MAXDIRECTION; ++d) {
                     // Avoid fill self eye
                     if (NeighboorhoodState[d]==SELF && Liberties[d] > 1) {
@@ -395,10 +417,13 @@ int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_len
                 // 3 digit zxy, z means eat or not, and put at (x, y)
                 MoveList[legal_moves] = eat_move * 100 + next_x * 10 + y ;
                 legal_moves++;
+                if(random_bit == 1 && legal_moves == 1){
+                    break;
+                }
 		    }
 		 }
 	    }
-	}
+	    intersection_checked++;
     }
     return legal_moves;
 }
@@ -411,7 +436,7 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
     int i,j;
     int sample = 0; // do samples
      // samples for each parent
-    int first_N_round = 15; // UCB first n round
+    int first_N_round = 30; // UCB first n round
     int Num_max_samples = num_legal_moves*first_N_round;
     if(num_legal_moves>60)
         Num_max_samples += 300;
@@ -435,6 +460,7 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
     // NUMINTERSECTION
     int NewMoveList[HISTORYLENGTH]; // avoid to modify MoveList
     int NextBoard[BOUNDARYSIZE][BOUNDARYSIZE]; // avoid to modify Board
+    int UpdatedBoard[NUMINTERSECTION][BOUNDARYSIZE][BOUNDARYSIZE]; // remember boards updated by MoveList
     int turn_reset; // avoid to modify turn
     int next_legal_moves = 0; // avoid to modify num_legal_moves
     // write something to file
@@ -453,8 +479,10 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
         games_in_branch[i] = 0;
         UCB[i] = 0;
 	}
+	int moves;
 	start_t = clock();
 	for(sample=1 ; sample<=Num_max_samples+1 ; sample++){
+        moves = 0;
         if(sample <= num_legal_moves*first_N_round)
             move_id = sample%num_legal_moves;
         // calculate max UCB
@@ -481,12 +509,17 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
         turn_reset = turn;
         for(j=1 ; j<150 ; j++){
             // update
-            if(j==1){
+            if(j==1 && sample<=num_legal_moves){
                 do_move(NextBoard, turn_reset, MoveList[move_id]);
+                copy(&NextBoard[0][0], &NextBoard[0][0] + 11*11, &UpdatedBoard[move_id][0][0]);
+                //fprintf(fp,"%d %d %d\n",(MoveList[move_id] % 100) / 10,MoveList[move_id] % 10, turn);
+            }
+            else if(j==1 && sample>num_legal_moves){
+                copy(&UpdatedBoard[move_id][0][0], &UpdatedBoard[move_id][0][0] + 11*11, &NextBoard[0][0]);
                 //fprintf(fp,"%d %d %d\n",(MoveList[move_id] % 100) / 10,MoveList[move_id] % 10, turn);
             }
             else{
-                do_move(NextBoard, turn_reset, NewMoveList[rand()%next_legal_moves]);
+                do_move(NextBoard, turn_reset, NewMoveList[0]);
             }
             // change turn
             if(turn_reset == BLACK){
@@ -496,13 +529,13 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
                 turn_reset = BLACK;
             }
 
-            next_legal_moves = gen_legal_move(NextBoard, turn_reset, game_length, GameRecord, NewMoveList);
+            next_legal_moves = gen_legal_move(NextBoard, turn_reset, game_length, GameRecord, NewMoveList, RANDOM);
 
             if(next_legal_moves == 0){
                 score = final_score(NextBoard);
                 // penalize lose points
                 if(score <= DEFAULTKOMI){
-                    scores_in_branch[move_id] = (float) scores_in_branch[move_id] - 50*(score-DEFAULTKOMI)*(score-DEFAULTKOMI);
+                    scores_in_branch[move_id] = (float) scores_in_branch[move_id] + 25*(score-DEFAULTKOMI);
                     games_in_branch[move_id]++;
                 }
                 else {
@@ -574,7 +607,7 @@ int genmove(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int time_limit, int
     int num_legal_moves = 0;
     int return_move = 0;
 
-    num_legal_moves = gen_legal_move(Board, turn, game_length, GameRecord, MoveList);
+    num_legal_moves = gen_legal_move(Board, turn, game_length, GameRecord, MoveList, NONRANDOM);
 
     return_move = rand_pick_move(num_legal_moves, MoveList, Board, turn, game_length, GameRecord);
 
