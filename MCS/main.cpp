@@ -57,13 +57,18 @@ const char LabelX[]="0ABCDEFGHJ";
 void do_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int move);
 double final_score(int Board[BOUNDARYSIZE][BOUNDARYSIZE]);
 
+int NewGameRecord[MAXGAMELENGTH][BOUNDARYSIZE][BOUNDARYSIZE];
+
 // MCST tree
 struct node {
   struct node *firstchild;
   struct node *nextsibling;
+  struct node *parent;
+  struct node *min_max_branch;
   int branch_id;
   int games;
   float score;
+  int turn;
 };
 /*
  * This function reset the board, the board intersections are labeled with 0,
@@ -368,11 +373,11 @@ int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_len
                 for (int d = 0 ; d < MAXDIRECTION; ++d) {
                     // Check if there is one self component which has more than one liberty
                     if (NeighboorhoodState[d]==SELF && Liberties[d] > 1) {
-                    check_flag = 1;
+                        check_flag = 1;
                     }
                     // Check if there is one opponent's component which has exact one liberty
                     if (NeighboorhoodState[d]==OPPONENT && Liberties[d] == 1) {
-                    eat_flag = 1;
+                        eat_flag = 1;
                     }
                 }
                 if (check_flag == 1) {
@@ -394,7 +399,7 @@ int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_len
          }
          bool repeat_move = 0;
 		 if (next_x !=0 && next_y !=0) {
-            if(game_length >= 10){
+            if(game_length >= 7){
                 // copy the current board to next board
                 copy(&Board[0][0], &Board[0][0] + 11*11, &NextBoard[0][0]);
                 // do the move
@@ -406,13 +411,25 @@ int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_len
                     NextBoard[x][y] = turn;
                 }
                 // Check the history to avoid the repeat board (what the fuck?)
-                bool repeat_flag = 1;
-                if (NextBoard[next_x][next_y] != GameRecord[game_length-1][next_x][next_y]) {
-                    repeat_flag = 0;
-                }
-
-                if (repeat_flag == 1 && eat_move == 1) {
-                    repeat_move = 1;
+                if (eat_move == 1){
+                    for (int t = game_length-1 ; t >= 0; t--) {
+                        bool repeat_flag = 1;
+                        for (int i = 1; i <=BOARDSIZE; ++i) {
+                            for (int j = 1; j <=BOARDSIZE; ++j) {
+                                if (NextBoard[i][j] != GameRecord[t][i][j]) {
+                                    repeat_flag = 0;
+                                    break;
+                                }
+                            }
+                            if(repeat_flag == 0){
+                                break;
+                            }
+                        }
+                        if (repeat_flag == 1) {
+                            repeat_move = 1;
+                            break;
+                        }
+                    }
                 }
             }
 		    if (repeat_move == 0) {
@@ -423,80 +440,103 @@ int gen_legal_move(int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int game_len
                     break;
                 }
 		    }
-		 }
+
+	    }
 	    }
 	    intersection_checked++;
     }
     return legal_moves;
 }
 
-int max_samples(int num_legal_moves, int first_N_round){
-    int Num_max_samples = num_legal_moves*first_N_round;
-    if(num_legal_moves>60)
-        Num_max_samples += 10000;
-    if(num_legal_moves<=60 && num_legal_moves>50)
-        Num_max_samples += 15000;
-    if(num_legal_moves<=50 && num_legal_moves>40)
-        Num_max_samples += 18000;
-    if(num_legal_moves<=40 && num_legal_moves>20)
-        Num_max_samples += 20000;
-    if(num_legal_moves<=20)
-        Num_max_samples += 5000;
-    return Num_max_samples;
+int free_tree(struct node *Root){
+    if(Root == NULL){
+        return 0;
+    }
+    if(Root->firstchild != NULL)
+        free_tree(Root->firstchild);
+    if(Root->nextsibling != NULL)
+        free_tree(Root->nextsibling);
+
+    free(Root);
+    return 0;
 }
 
-float simulation(){
-    return (rand()%10007) - 5000;
+float min_max(struct node *Root, int root_turn, int sample){
+    float m = -10000;
+    float t = 0;
+    int N;
+    struct node *curr = NULL;
+    if(Root->firstchild == NULL){ // leaf
+        if(Root->turn == root_turn)
+            return (float)-(Root->score/Root->games + 1.414*sqrt(log(sample)/Root->games));
+        else
+            return (float)((Root->score)/Root->games + 1.414*sqrt(log(sample)/Root->games));
+    }
+    else{
+        N = Root->games;
+        curr = Root->firstchild;
+        while(curr != NULL){
+            t = -min_max(curr,root_turn,N);
+            if(t > m){
+                Root->min_max_branch = curr;
+                m = t;
+            }
+            curr = curr->nextsibling;
+        }
+        return m;
+    }
 }
 
-void Expansion(struct node *Root, int N , int samples){
+void Expansion(struct node *Root, int N , int samples, int scores_in_branch[NUMINTERSECTION],
+               int games_in_branch[NUMINTERSECTION], int MoveList[HISTORYLENGTH], int turn){
     struct node *curr = NULL;
     struct node *prev = NULL;
     int i,j;
     // N: how many nodes to expand
-
-    curr = (node *)malloc(sizeof(struct node));
-    prev = (node *)malloc(sizeof(struct node));
-
-    curr->firstchild = curr->nextsibling = NULL;
-    curr->branch_id = 1;
-    curr->games = samples;
-    curr->score = 0;
-    for(j=1 ; j<=samples ; j++){
-        curr->score += simulation();
-    }
-
-    Root->firstchild = curr;
-    prev = curr;
-
-    for(i=2 ; i<=N ; i++){
+    if(N > 0){
         curr = (node *)malloc(sizeof(struct node));
         curr->firstchild = curr->nextsibling = NULL;
-        curr->branch_id = i;
+        curr->branch_id = MoveList[0];
+        curr->parent = Root;
+        curr->min_max_branch = NULL;
         curr->games = samples;
-        curr->score = 0;
-        for(j=1 ; j<=samples ; j++){
-            curr->score += simulation();
-        }
+        curr->score = scores_in_branch[0];
+        curr->turn = turn;
 
-        prev->nextsibling = curr;
+        Root->firstchild = curr;
         prev = curr;
-    }
+        //free(curr);
 
-    curr = Root->firstchild;
-    while(curr != NULL){
-        Root->games += samples;
-        Root->score += curr->score;
-        curr = curr->nextsibling;
+        for(i=1 ; i<N ; i++){
+            //curr = NULL;
+            curr = (node *)malloc(sizeof(struct node));
+            curr->firstchild = curr->nextsibling = NULL;
+            curr->branch_id = MoveList[i];
+            curr->parent = Root;
+            curr->min_max_branch = NULL;
+            curr->games = samples;
+            curr->score = scores_in_branch[i];
+            curr->turn = turn;
+
+            prev->nextsibling = curr;
+            prev = curr;
+
+        }
+        curr = Root->firstchild;
+        while(curr != NULL){
+            Root->games += samples;
+            Root->score += curr->score;
+            curr = curr->nextsibling;
+        }
     }
 }
 
-void simulate(int num_legal_moves, int first_N_round , int MoveList[HISTORYLENGTH],
-              int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn,
+int simulate(int num_legal_moves, int first_N_round , int MoveList[HISTORYLENGTH],
+              int Board[BOUNDARYSIZE][BOUNDARYSIZE], int turn, int root_turn,
               int game_length, int GameRecord[MAXGAMELENGTH][BOUNDARYSIZE][BOUNDARYSIZE],
               int scores_in_branch[NUMINTERSECTION], int games_in_branch[NUMINTERSECTION],
-              double UCB[NUMINTERSECTION], int Num_max_samples){
-    int i,j;
+              double UCB[NUMINTERSECTION]){
+    int i,j,k;
     int score;
     int sample = 0;
     int tmp;
@@ -507,86 +547,96 @@ void simulate(int num_legal_moves, int first_N_round , int MoveList[HISTORYLENGT
     int NextBoard[BOUNDARYSIZE][BOUNDARYSIZE]; // avoid to modify Board
     int New_game_length = 0;
     int UpdatedBoard[NUMINTERSECTION][BOUNDARYSIZE][BOUNDARYSIZE];
-    int NewGameRecord[MAXGAMELENGTH][BOUNDARYSIZE][BOUNDARYSIZE];
+
     int NewMoveList[HISTORYLENGTH]; // avoid to modify MoveList
     int turn_reset; // avoid to modify turn
     int next_legal_moves = 0; // avoid to modify num_legal_move
 
-    if(game_length > 0 ){
-        copy(&GameRecord[0][0][0], &GameRecord[0][0][0] + game_length*BOUNDARYSIZE*BOUNDARYSIZE,
-             &NewGameRecord[0][0][0]);
+    if(num_legal_moves == 0){
+        //fclose(fp);
+        return 0;
     }
-
-    for(sample=1 ; sample<=Num_max_samples+1 ; sample++){
-        if(sample <= num_legal_moves*first_N_round)
-            move_id = sample%num_legal_moves;
-        // calculate max UCB
-        if(sample > num_legal_moves*first_N_round){
-            tmp = log(sample-1);
-            for(i=0 ; i<num_legal_moves ; i++){
-                UCB[i] = (double) scores_in_branch[i]/games_in_branch[i] + 1.414*sqrt(tmp/games_in_branch[i]);
-                if(i==0){
-                    max_UCB_id = 0;
-                    max_UCB = UCB[0];
-                }
-                else if(UCB[i]>max_UCB){
-                    max_UCB_id = i;
-                    max_UCB = UCB[i];
-                }
-
-            }
-            move_id = max_UCB_id;
-            //fprintf(fp,"Best UCB Move id %d with UCB %.3f at length %d sample %d\n",move_id,UCB[move_id],game_length,sample);
+    else{
+        //fprintf(fp,"Enter simulate()\n");
+        if(game_length > 0 ){
+            copy(&GameRecord[0][0][0], &GameRecord[0][0][0] + game_length*BOUNDARYSIZE*BOUNDARYSIZE,
+                 &NewGameRecord[0][0][0]);
         }
-        if(sample == Num_max_samples+1)
-            break;
-
-        New_game_length = game_length;
-        copy(&Board[0][0], &Board[0][0] + 11*11, &NextBoard[0][0]);
-        turn_reset = turn;
-        for(j=1 ; j<150 ; j++){
-            // update
-            if(j==1 && sample<=num_legal_moves){
-                do_move(NextBoard, turn_reset, MoveList[move_id]);
-                copy(&NextBoard[0][0], &NextBoard[0][0] + 11*11, &UpdatedBoard[move_id][0][0]);
-                //fprintf(fp,"%d %d %d\n",(MoveList[move_id] % 100) / 10,MoveList[move_id] % 10, turn);
-            }
-            else if(j==1 && sample>num_legal_moves){
-                copy(&UpdatedBoard[move_id][0][0], &UpdatedBoard[move_id][0][0] + 11*11, &NextBoard[0][0]);
-                //fprintf(fp,"%d %d %d\n",(MoveList[move_id] % 100) / 10,MoveList[move_id] % 10, turn);
-            }
-            else{
-                do_move(NextBoard, turn_reset, NewMoveList[0]);
-            }
-            // change turn
-            if(turn_reset == BLACK){
-                turn_reset = WHITE;
-            }
-            else{
-                turn_reset = BLACK;
-            }
-
-            //copy(&NextBoard[0][0], &NextBoard[0][0] + BOUNDARYSIZE*BOUNDARYSIZE,
-                 //&NewGameRecord[New_game_length][0][0]);
-            //New_game_length++;
-            next_legal_moves = gen_legal_move(NextBoard, turn_reset, New_game_length, NewGameRecord, NewMoveList, RANDOM);
-            if(next_legal_moves == 0){
-                score = final_score(NextBoard);
-                // penalize lose points
-                if(score <= DEFAULTKOMI){
-                    scores_in_branch[move_id] = (float) scores_in_branch[move_id] + 25*(score-DEFAULTKOMI);
-                    games_in_branch[move_id]++;
+        //fprintf(fp,"Copy initial GameRecord success\n");
+        for(sample=1 ; sample<=num_legal_moves*first_N_round+1 ; sample++){
+            if(sample <= num_legal_moves*first_N_round)
+                move_id = sample%num_legal_moves;
+            // calculate max UCB
+            if(sample > num_legal_moves*first_N_round){
+                tmp = log(sample-1);
+                for(i=0 ; i<num_legal_moves ; i++){
+                    UCB[i] = (double) scores_in_branch[i]/games_in_branch[i] + 1.414*sqrt(tmp/games_in_branch[i]);
                 }
-                else {
-                    scores_in_branch[move_id] = (float) scores_in_branch[move_id] + (score-DEFAULTKOMI);
-                    games_in_branch[move_id]++;
-                }
+                move_id = max_UCB_id;
+                //fprintf(fp,"Best UCB Move id %d with UCB %.3f at length %d sample %d\n",move_id,UCB[move_id],game_length,sample);
+            }
+            if(sample == num_legal_moves*first_N_round+1)
                 break;
+
+            New_game_length = game_length;
+            copy(&Board[0][0], &Board[0][0] + 11*11, &NextBoard[0][0]);
+            turn_reset = turn;
+            for(j=1 ; j<150 ; j++){
+                // update
+                if(j==1 && sample<=num_legal_moves){
+                    do_move(NextBoard, turn_reset, MoveList[move_id]);
+                    copy(&NextBoard[0][0], &NextBoard[0][0] + 11*11, &UpdatedBoard[move_id][0][0]);
+                    //fprintf(fp,"%d %d %d\n",(MoveList[move_id] % 100) / 10,MoveList[move_id] % 10, turn);
+                }
+                else if(j==1 && sample>num_legal_moves){
+                    copy(&UpdatedBoard[move_id][0][0], &UpdatedBoard[move_id][0][0] + 11*11, &NextBoard[0][0]);
+                    //fprintf(fp,"%d %d %d\n",(MoveList[move_id] % 100) / 10,MoveList[move_id] % 10, turn);
+                }
+                else{
+                    do_move(NextBoard, turn_reset, NewMoveList[0]);
+                }
+                // change turn
+                if(turn_reset == BLACK){
+                    turn_reset = WHITE;
+                }
+                else{
+                    turn_reset = BLACK;
+                }
+                /* gains about 13% overhead
+                 * gains about 13% overhead
+                 * gains about 13% overhead (Very important, so say three times)
+                 */
+                copy(&NextBoard[0][0], &NextBoard[0][0] + BOUNDARYSIZE*BOUNDARYSIZE,
+                     &NewGameRecord[New_game_length][0][0]);
+                New_game_length++;
+                next_legal_moves = gen_legal_move(NextBoard, turn_reset, New_game_length, NewGameRecord, NewMoveList, RANDOM);
+
+                if(next_legal_moves == 0 || j==149){
+                    score = final_score(NextBoard);
+                    // penalize lose points
+                    if(score <= DEFAULTKOMI){
+                        if(root_turn == BLACK)
+                            scores_in_branch[move_id] = (float) scores_in_branch[move_id] + 0;//+ (score-DEFAULTKOMI);
+                        if(root_turn == WHITE)
+                            scores_in_branch[move_id] = (float) scores_in_branch[move_id] + 1;//- (score-DEFAULTKOMI);
+                        games_in_branch[move_id]++;
+                    }
+                    else {
+                        if(root_turn == BLACK)
+                            scores_in_branch[move_id] = (float) scores_in_branch[move_id] + 1;//+ (score-DEFAULTKOMI);
+                        if(root_turn == WHITE)
+                            scores_in_branch[move_id] = (float) scores_in_branch[move_id] + 0;//- (score-DEFAULTKOMI);
+                        games_in_branch[move_id]++;
+                    }
+                    break;
+                }
+                else if(next_legal_moves != 0)
+                    continue;
             }
-            else if(next_legal_moves != 0)
-                continue;
+            //fprintf(fp,"simulate length %d\n",j);
         }
     }
+    return 0;
 }
 /*
  * This function randomly selects one move from the MoveList.
@@ -597,58 +647,73 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
     int i,j;
     int tmp;
     int sample = 0; // do samples
+    int max_sample = 20000;
+    int repeat = 0;
+    int expansion_max = 100;
      // samples for each parent
-    int first_N_round = 150; // UCB first n round
-    int Num_max_samples = max_samples(num_legal_moves,first_N_round);
+    int first_N_round = 50; // UCB first n round
+    int expansion_N_round = 5;
     // variables for statistic use
-    int score;
+    float score;
     float max_score;
+    float max_UCB;
+    int N;
+    int NextBoard[BOUNDARYSIZE][BOUNDARYSIZE];
+    int NewGameRecord[MAXGAMELENGTH][BOUNDARYSIZE][BOUNDARYSIZE];
+    int New_game_length = 0;
+    int NewMoveList[HISTORYLENGTH];
+    int next_legal_moves = 0;
     double UCB[NUMINTERSECTION];
+    double tmpUCB[NUMINTERSECTION];
     int scores_in_branch[NUMINTERSECTION];
     int games_in_branch[NUMINTERSECTION];
     int max_move_id = 0;
+    int turn_reset;
+    // tree
+    float update_score = 0;
+    int update_games = 0;
 
     // NUMINTERSECTION
 
     // write something to file
     FILE *fp;
-    fp = fopen("stdout.txt","a");
+    fp = fopen("stdout2.txt","a");
     setbuf(fp, NULL);
     srand(time(NULL));
 
+
     struct node *Root = NULL;
+    struct node *curr = NULL;
+    struct node *best = NULL;
 
     Root = (node *)malloc(sizeof(struct node));
 
+    Root->nextsibling = NULL;
+    Root->parent = NULL;
+    Root->min_max_branch = NULL;
     Root->branch_id = 0; // root
     Root->games = 0;
     Root->score = 0;
 
-    if (num_legal_moves == 0)
+    if (num_legal_moves == 0){
+        free(Root);
+        //free(curr);
+        fclose(fp);
         return 0;
+    }
+    else if(num_legal_moves == 1){
+        free(Root);
+        //free(curr);
+        fclose(fp);
+        return MoveList[0];
+    }
     else {
     // dingshi
     int move_id, move_eat, move_x, move_y;
-    int star_x[9] = {3,3,3,5,5,5,7,7,7};
-    int star_y[9] = {3,5,7,3,5,7,3,5,7};
-    int star_valid[9] = {0,0,0,0,0,0,0,0,0};
-    j = 0;
-    for(i=0 ; i<num_legal_moves ; i++){
-        move_id = MoveList[i];
-        move_eat = move_id / 100;
-        move_x = (move_id % 100) / 10;
-        move_y = move_id % 10;
 
-        if(move_x==3 | move_x==5 | move_x==7){
-            if(move_y==3 | move_y==5 | move_y==7){
-                star_valid[j] = move_eat*100 + move_x*10 + move_y;
-                j++;
-            }
-        }
-    }
-    if(j>0 && game_length<7){
-        tmp = rand()%j;
-        return star_valid[tmp];
+
+    if(game_length==0 && turn == BLACK){
+        return 55;
     }
 
     // simulate
@@ -658,26 +723,131 @@ int rand_pick_move(int num_legal_moves, int MoveList[HISTORYLENGTH], int Board[B
         UCB[i] = 0;
 	}
 
+	turn_reset = turn;
+
 	start_t = clock();
 
-	simulate(num_legal_moves, first_N_round, MoveList, Board, turn, game_length, GameRecord,
-             scores_in_branch, games_in_branch, UCB, Num_max_samples);
+	simulate(num_legal_moves, first_N_round, MoveList, Board, turn_reset, turn, game_length, GameRecord,
+             scores_in_branch, games_in_branch, UCB);
+
+    // update tree
+    Expansion(Root,num_legal_moves,first_N_round,scores_in_branch,games_in_branch,MoveList,turn_reset);
+
+    end_t = clock();
+    time_taken = ((double)(end_t-start_t))/CLOCKS_PER_SEC;
+    fprintf(fp,"Time: %.3f seconds at length %d, with legal moves: %d and samples: %d\n", time_taken, game_length, num_legal_moves, num_legal_moves*first_N_round);
+
+
+    start_t = clock();
+    // MCTS
+
+    while(sample <= max_sample && repeat <= expansion_max){
+        repeat++;
+        copy(&Board[0][0], &Board[0][0] + 11*11, &NextBoard[0][0]);
+        turn_reset = turn;
+        New_game_length = game_length;
+        if(game_length > 0 ){
+            copy(&GameRecord[0][0][0], &GameRecord[0][0][0] + game_length*BOUNDARYSIZE*BOUNDARYSIZE,
+                 &NewGameRecord[0][0][0]);
+        }
+        //fprintf(fp,"-----------------\n");
+        //min_max(Root, turn, 0);
+
+        N = Root->games;
+        curr = Root->firstchild;
+
+        fprintf(fp,"New update\n");
+        while(curr != NULL){
+            max_UCB = -10000;
+            while(curr != NULL){
+                if(turn_reset==turn){
+                    score = curr->score/curr->games + 1.414*sqrt(log(N)/curr->games);
+                }
+                else if(turn_reset!=turn){
+                    score = (curr->games-curr->score)/curr->games + 1.414*sqrt(log(N)/curr->games);
+                }
+                if(score > max_UCB){
+                    max_UCB = score;
+                    best = curr;
+                }
+                curr = curr->nextsibling;
+            }
+            fprintf(fp,"score:%.f move_id:%d games:%d turn:%d\n",best->score,best->branch_id,best->games,best->turn);
+            do_move(NextBoard, turn_reset, best->branch_id);
+            if(turn_reset == BLACK){
+                turn_reset = WHITE;
+            }
+            else{
+                turn_reset = BLACK;
+            }
+            copy(&NextBoard[0][0], &NextBoard[0][0] + BOUNDARYSIZE*BOUNDARYSIZE,
+                 &NewGameRecord[New_game_length][0][0]);
+            New_game_length++;
+            curr = best->firstchild;
+        }
+
+        update_score = best->score;
+        update_games = best->games;
+        for(i=0 ; i<NUMINTERSECTION ; i++){
+            scores_in_branch[i] = 0;
+            games_in_branch[i] = 0;
+            tmpUCB[i] = 0;
+        }
+        next_legal_moves = gen_legal_move(NextBoard, turn_reset, New_game_length, NewGameRecord, NewMoveList, NONRANDOM);
+        if(next_legal_moves > 0){
+            sample += next_legal_moves*expansion_N_round;
+
+            //fprintf(fp,"Moves:%d Simulate:%d sample:%d length:%d turn_reset:%d\n",next_legal_moves, expansion_N_round,sample,New_game_length,turn_reset);
+
+            simulate(next_legal_moves, expansion_N_round, NewMoveList, NextBoard, turn_reset, turn, New_game_length,
+                     NewGameRecord, scores_in_branch, games_in_branch, tmpUCB);
+
+            //fprintf(fp,"Simulated\n");
+
+            Expansion(best,next_legal_moves,expansion_N_round,scores_in_branch,games_in_branch,NewMoveList,turn_reset);
+
+            //fprintf(fp,"Exapnsion done\n");
+
+            update_score = best->score - update_score;
+            update_games = best->games - update_games;
+
+            curr = best;
+            curr = curr->parent;
+            while(curr != NULL){
+                curr->games += update_games;
+                curr->score += update_score;
+                //fprintf(fp,"%d %d %.f\n",curr->branch_id,curr->games,curr->score);
+                curr = curr->parent;
+            }
+            //fprintf(fp,"Path and root updated\n");
+        }
+        else{
+            break;
+        }
+    }
 
 	end_t = clock();
     time_taken = ((double)(end_t-start_t))/CLOCKS_PER_SEC;
-    fprintf(fp,"Time: %.3f seconds at length %d, with legal moves: %d and samples: %d\n", time_taken, game_length, num_legal_moves, Num_max_samples);
+    fprintf(fp,"Time: %.3f seconds at length %d, samples: %d\n", time_taken, game_length, sample);
 	// statistics
-	for(i=0 ; i<num_legal_moves ; i++){
-        if(i == 0){
-            max_score = UCB[i];
-            max_move_id = i;
+	curr = Root->firstchild;
+	max_score = (float) curr->score/curr->games;
+	fprintf(fp,"score:%.3f move_id:%d games:%d length:%d\n",max_score,curr->branch_id,curr->games,game_length);
+    max_move_id = curr->branch_id;
+    curr = curr->nextsibling;
+	while(curr != NULL){
+        score = (float) curr->score/curr->games;
+        fprintf(fp,"score:%.3f move_id:%d games:%d length:%d\n",score,curr->branch_id,curr->games,game_length);
+        if(score>max_score){
+            max_score = score;
+            max_move_id = curr->branch_id;
         }
-        else if(UCB[i]>max_score){
-            max_score = UCB[i];
-            max_move_id = i;
-        }
+        curr = curr->nextsibling;
 	}
-	return MoveList[max_move_id];
+	fprintf(fp,"score:%.3f move_id:%d length:%d\n",max_score,max_move_id,game_length);
+	free_tree(Root);
+    fclose(fp);
+	return max_move_id;
     }
 }
 /*
@@ -998,9 +1168,6 @@ void gtp_main(int display) {
     }
 }
 int main(int argc, char* argv[]) {
-    FILE *fp;
-    fp = fopen("stdout.txt","w");
-    fclose(fp);
 //    int type = GTPVERSION;// 1: local version, 2: gtp version
     int type = GTPVERSION;// 1: local version, 2: gtp version
     int display = 0; // 1: display, 2 nodisplay
